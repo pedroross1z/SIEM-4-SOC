@@ -2273,7 +2273,38 @@ if dados:
 1) Consulta de IP: Crie um programa que receba uma lista de IPs e consulte informações de cada um usando a API gratuita do ipinfo.io (https://ipinfo.io/{ip}/json). Exiba: cidade, região, país, organização e se é VPN/proxy. Gere um relatório classificando os IPs como internos ou externos. Dados para teste:
 
 ```python 
+ips = [
+    "8.8.8.8",          # Google DNS
+    "1.1.1.1",          # Cloudflare
+    "185.220.101.1",    # Nó Tor (suspeito)
+    "208.67.222.222",   # OpenDNS
+    "91.240.118.172",   # IP malicioso conhecido
+]
 
+# Saída esperada (exemplo):
+# === Relatório de IPs ===
+#
+# IP: 8.8.8.8
+#   Cidade: Mountain View
+#   Região: California
+#   País: US
+#   Org: AS15169 Google LLC
+#   Tipo: EXTERNO
+#
+# IP: 1.1.1.1
+#   Cidade: Los Angeles
+#   Região: California
+#   País: US
+#   Org: AS13335 Cloudflare, Inc.
+#   Tipo: EXTERNO
+#
+# ...
+#
+# === Resumo ===
+# Total de IPs consultados: 5
+# Externos: 5
+# Internos: 0
+# Erros de consulta: 0
 ```
 
 
