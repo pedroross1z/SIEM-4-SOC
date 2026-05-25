@@ -1,4 +1,4 @@
-# SecuraPy SIEM — Trabalho Final
+# SecuraPy SIEM — Trabalho Fina
 
 ## Como usar este projeto
 
