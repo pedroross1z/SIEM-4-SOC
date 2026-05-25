@@ -152,12 +152,16 @@ def iniciar_servidor(host=HOST, porta=PORTA):
         return
 
     servidor.listen(MAX_CLIENTES)
+    servidor.settimeout(1.0)
     print(f"[INFO] Servidor de alertas escutando em {host}:{porta}")
+    print("[INFO] Pressione Ctrl+C para encerrar.")
 
     try:
         while True:
             try:
                 conexao, endereco = servidor.accept()
+            except socket.timeout:
+                continue
             except OSError:
                 break
 
