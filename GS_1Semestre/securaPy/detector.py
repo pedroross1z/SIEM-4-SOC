@@ -9,127 +9,151 @@ Detecta:
 - IPs em Blacklist: IPs conhecidamente maliciosos presentes nos logs
 """
 
+from regras import classificar_severidade
+
+
+def _extrair_kv(detalhes):
+    pares = {}
+    if not isinstance(detalhes, str):
+        return pares
+    for token in detalhes.split():
+        if "=" in token:
+            chave, _, valor = token.partition("=")
+            if chave:
+                pares[chave] = valor
+    return pares
+
+
+def _severidade_brute(tentativas, threshold):
+    if tentativas > 20:
+        return "CRITICA"
+    if tentativas > 10:
+        return "ALTA"
+    if tentativas > 5:
+        return "MEDIA"
+    return "BAIXA"
+
+
+def _severidade_scan(quantidade, threshold):
+    if quantidade > 10:
+        return "CRITICA"
+    if quantidade > 5:
+        return "ALTA"
+    return "MEDIA"
+
 
 def detectar_brute_force(eventos, threshold=5):
-    """
-    Identifica IPs com muitas tentativas de login falhas.
+    """Identifica IPs com muitas tentativas de login falhas."""
+    contagem = {}
+    usuarios = {}
 
-    Parametros:
-        eventos (list[dict]): lista de eventos normalizados
-        threshold (int): numero minimo de falhas para considerar brute force
+    for evento in eventos:
+        if evento.get("fonte") != "auth" or evento.get("tipo") != "FAIL":
+            continue
+        ip = evento.get("ip")
+        if not ip:
+            continue
+        contagem[ip] = contagem.get(ip, 0) + 1
+        usuario = _extrair_kv(evento.get("detalhes", "")).get("usuario")
+        if usuario:
+            usuarios.setdefault(ip, set()).add(usuario)
 
-    Retorna:
-        dict: {ip: {"tentativas": N, "usuarios": [...], "severidade": "..."}}
-        Apenas IPs com tentativas >= threshold sao incluidos.
-
-    Classificacao de severidade:
-        > 20 tentativas: "CRITICA"
-        > 10 tentativas: "ALTA"
-        > 5  tentativas: "MEDIA"
-        >= threshold:    "BAIXA"
-
-    Comportamento esperado:
-        - Filtra apenas eventos da fonte "auth" com tipo "FAIL"
-        - Conta quantas falhas cada IP teve
-        - Registra quais usuarios foram tentados (sem duplicatas)
-        - Retorna apenas IPs que atingiram o threshold
-
-    Dicas:
-        - Use um dicionario para contar: contagem[ip] = contagem.get(ip, 0) + 1
-        - Para usuarios sem duplicata, use um set: usuarios[ip].add(usuario)
-        - Filtre no final: {ip: dados for ip, dados in resultado.items() if dados["tentativas"] >= threshold}
-    """
-    pass
+    resultado = {}
+    for ip, tentativas in contagem.items():
+        if tentativas < threshold:
+            continue
+        resultado[ip] = {
+            "tentativas": tentativas,
+            "usuarios": sorted(usuarios.get(ip, set())),
+            "severidade": _severidade_brute(tentativas, threshold),
+        }
+    return resultado
 
 
 def detectar_port_scan(eventos, threshold=3):
-    """
-    Identifica IPs que tentaram acessar muitas portas distintas.
+    """Identifica IPs que tentaram acessar muitas portas distintas."""
+    portas_por_ip = {}
 
-    Parametros:
-        eventos (list[dict]): lista de eventos normalizados
-        threshold (int): numero minimo de portas unicas para considerar port scan
+    for evento in eventos:
+        if evento.get("fonte") != "firewall" or evento.get("tipo") != "BLOCK":
+            continue
+        ip = evento.get("ip")
+        if not ip:
+            continue
+        try:
+            dport = int(_extrair_kv(evento.get("detalhes", "")).get("dport", ""))
+        except (TypeError, ValueError):
+            continue
+        portas_por_ip.setdefault(ip, set()).add(dport)
 
-    Retorna:
-        dict: {ip: {"portas": set(...), "quantidade": N, "severidade": "..."}}
-        Apenas IPs com portas unicas >= threshold sao incluidos.
-
-    Classificacao de severidade:
-        > 10 portas: "CRITICA"
-        > 5  portas: "ALTA"
-        >= threshold: "MEDIA"
-
-    Comportamento esperado:
-        - Filtra eventos da fonte "firewall" com tipo "BLOCK"
-        - Extrai a porta destino (dport) do campo "detalhes"
-        - Usa SET para contar portas unicas por IP (sem duplicatas)
-
-    Dicas:
-        - Para extrair dport do detalhes: procure "dport=" no texto
-        - Use set() para armazenar portas: portas_por_ip[ip] = set()
-        - portas_por_ip[ip].add(porta)
-        - quantidade = len(portas_por_ip[ip])
-    """
-    pass
+    resultado = {}
+    for ip, portas in portas_por_ip.items():
+        if len(portas) < threshold:
+            continue
+        resultado[ip] = {
+            "portas": portas,
+            "quantidade": len(portas),
+            "severidade": _severidade_scan(len(portas), threshold),
+        }
+    return resultado
 
 
 def verificar_blacklist(eventos, blacklist):
-    """
-    Cruza os IPs encontrados nos eventos com uma blacklist conhecida.
+    """Cruza IPs dos eventos com a blacklist."""
+    ips_eventos = {evento["ip"] for evento in eventos if evento.get("ip")}
+    ips_encontrados = ips_eventos & blacklist
 
-    Parametros:
-        eventos (list[dict]): lista de eventos normalizados
-        blacklist (set): conjunto de IPs maliciosos conhecidos
+    contagem = {}
+    for evento in eventos:
+        ip = evento.get("ip")
+        if ip in ips_encontrados:
+            contagem[ip] = contagem.get(ip, 0) + 1
 
-    Retorna:
-        tuple: (ips_encontrados, contagem_por_ip)
-        - ips_encontrados (set): IPs que estao na blacklist E nos eventos
-        - contagem_por_ip (dict): {ip: numero_de_eventos} para cada IP da blacklist
-
-    Comportamento esperado:
-        - Extrai todos os IPs unicos dos eventos (use um set)
-        - Faz a INTERSECAO com a blacklist para encontrar os maliciosos
-        - Conta quantos eventos cada IP malicioso gerou
-
-    Dicas:
-        - ips_eventos = {evento["ip"] for evento in eventos}  # set comprehension
-        - ips_encontrados = ips_eventos & blacklist  # intersecao de sets
-        - Para contar, itere pelos eventos e incremente se ip esta em ips_encontrados
-    """
-    pass
+    return ips_encontrados, contagem
 
 
 def gerar_resumo_ameacas(brute_force, port_scan, blacklist_resultado):
-    """
-    Consolida todas as deteccoes em um resumo unificado de ameacas.
+    """Consolida todas as deteccoes em um resumo unificado ordenado por pontuacao."""
+    ips_blacklist, contagem_blacklist = blacklist_resultado
 
-    Parametros:
-        brute_force (dict): resultado de detectar_brute_force()
-        port_scan (dict): resultado de detectar_port_scan()
-        blacklist_resultado (tuple): resultado de verificar_blacklist() -> (set, dict)
+    todos_ips = set(brute_force.keys()) | set(port_scan.keys()) | set(ips_blacklist)
 
-    Retorna:
-        list[dict]: lista de ameacas ordenada por pontuacao (maior primeiro)
-        Cada ameaca eh um dict com:
-        {
-            "ip": "185.220.101.1",
-            "deteccoes": ["brute_force", "port_scan", "blacklist"],
-            "pontuacao": 15,
-            "severidade": "CRITICA",
-            "detalhes": { ... resumo de cada deteccao ... }
-        }
+    ameacas = []
+    for ip in todos_ips:
+        deteccoes = []
+        detalhes = {}
+        pontuacao = 0
 
-    Comportamento esperado:
-        - Junta todos os IPs suspeitos das 3 deteccoes
-        - Para cada IP, lista em quais deteccoes apareceu
-        - Calcula pontuacao: brute_force=5pts, port_scan=5pts, blacklist=5pts
-          (IPs com multiplas deteccoes tem pontuacao somada)
-        - Classifica severidade pela pontuacao total
-        - Ordena do mais critico para o menos
+        if ip in brute_force:
+            deteccoes.append("brute_force")
+            detalhes["brute_force"] = brute_force[ip]
+            pontuacao += 5
 
-    Dicas:
-        - Junte os IPs: todos_ips = set(brute_force.keys()) | set(port_scan.keys()) | blacklist_ips
-        - Use um loop para verificar em quais deteccoes cada IP aparece
-        - Use sorted() com key=lambda para ordenar por pontuacao
-    """
-    pass
+        if ip in port_scan:
+            deteccoes.append("port_scan")
+            detalhes["port_scan"] = port_scan[ip]
+            pontuacao += 5
+
+        if ip in ips_blacklist:
+            deteccoes.append("blacklist")
+            detalhes["blacklist"] = {"eventos": contagem_blacklist.get(ip, 0)}
+            pontuacao += 5
+
+        ameacas.append({
+            "ip": ip,
+            "deteccoes": deteccoes,
+            "pontuacao": pontuacao,
+            "severidade": classificar_severidade(pontuacao),
+            "detalhes": detalhes,
+        })
+
+    def _intensidade(a):
+        d = a["detalhes"]
+        return (
+            d.get("brute_force", {}).get("tentativas", 0)
+            + d.get("port_scan", {}).get("quantidade", 0)
+            + d.get("blacklist", {}).get("eventos", 0)
+        )
+
+    ameacas.sort(key=lambda a: (a["pontuacao"], _intensidade(a)), reverse=True)
+    return ameacas

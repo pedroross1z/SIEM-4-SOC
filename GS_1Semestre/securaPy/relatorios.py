@@ -6,166 +6,169 @@ busca por IP, ranking de ameacas e exportacao de relatorios em JSON.
 
 import json
 import os
-from datetime import datetime
+
+
+_MENU = """
++==========================================+
+|         SecuraPy SIEM - Menu             |
++==========================================+
+|  1. Carregar e processar logs            |
+|  2. Resumo geral                         |
+|  3. Filtrar eventos                      |
+|  4. Buscar IP                            |
+|  5. Top 10 IPs suspeitos                 |
+|  6. Ver alertas por severidade           |
+|  7. Enriquecer IPs suspeitos             |
+|  8. Exportar relatorio JSON              |
+|  9. Iniciar servidor de alertas          |
+|  0. Sair                                 |
++==========================================+
+"""
 
 
 def exibir_menu():
-    """
-    Exibe o menu principal do SecuraPy e retorna a opcao escolhida.
-
-    Retorna:
-        int: numero da opcao escolhida (0-9)
-        Retorna -1 se o usuario digitar algo invalido.
-
-    Comportamento esperado:
-        - Exibe o menu formatado com as opcoes numeradas (0-9)
-        - Le a entrada do usuario com input()
-        - Converte para int e retorna
-        - Se a entrada nao for um numero valido, retorna -1
-
-    Menu:
-        1. Carregar e processar logs
-        2. Resumo geral
-        3. Filtrar eventos
-        4. Buscar IP
-        5. Top 10 IPs suspeitos
-        6. Ver alertas por severidade
-        7. Enriquecer IPs suspeitos
-        8. Exportar relatorio JSON
-        9. Iniciar servidor de alertas
-        0. Sair
-
-    Dicas:
-        - Use print() para desenhar o menu
-        - Envolva int(input()) em try/except ValueError
-    """
-    pass
+    """Exibe o menu principal e retorna a opcao (int) ou -1 se invalido."""
+    print(_MENU)
+    try:
+        opcao = int(input("Escolha uma opcao: ").strip())
+    except (ValueError, EOFError):
+        return -1
+    if opcao < 0 or opcao > 9:
+        return -1
+    return opcao
 
 
 def resumo_geral(eventos, alertas):
-    """
-    Exibe um resumo com contadores gerais do processamento.
+    """Imprime contadores de eventos por fonte e alertas por severidade."""
+    print("\n=== RESUMO GERAL ===")
+    print(f"Total de eventos: {len(eventos)}")
+    print(f"Total de alertas: {len(alertas)}")
 
-    Parametros:
-        eventos (list[dict]): todos os eventos carregados
-        alertas (list[dict]): todos os alertas gerados
+    por_fonte = {}
+    for ev in eventos:
+        fonte = ev.get("fonte", "?")
+        por_fonte[fonte] = por_fonte.get(fonte, 0) + 1
 
-    Comportamento esperado:
-        - Conta eventos por fonte (auth, firewall, web)
-        - Conta alertas por severidade (CRITICA, ALTA, MEDIA, BAIXA, INFO)
-        - Exibe total geral de eventos e alertas
-        - Formata como tabela legivel
+    if por_fonte:
+        print("\nEventos por fonte:")
+        for fonte, qtd in sorted(por_fonte.items()):
+            print(f"  {fonte:<10} {qtd}")
 
-    Dicas:
-        - Use dicionario como contador: contadores = {}
-        - contadores[fonte] = contadores.get(fonte, 0) + 1
-        - Faca o mesmo para severidades dos alertas
-    """
-    pass
+    por_sev = {}
+    for a in alertas:
+        sev = a.get("severidade", "?")
+        por_sev[sev] = por_sev.get(sev, 0) + 1
+
+    if por_sev:
+        ordem = ["CRITICA", "ALTA", "MEDIA", "BAIXA", "INFO"]
+        print("\nAlertas por severidade:")
+        for sev in ordem:
+            if sev in por_sev:
+                print(f"  {sev:<10} {por_sev[sev]}")
+        for sev, qtd in por_sev.items():
+            if sev not in ordem:
+                print(f"  {sev:<10} {qtd}")
 
 
 def filtrar_eventos(eventos, fonte=None, tipo=None, ip=None):
-    """
-    Filtra eventos pelos criterios fornecidos.
-
-    Parametros:
-        eventos (list[dict]): lista de eventos
-        fonte (str ou None): filtrar por fonte ("auth", "firewall", "web")
-        tipo (str ou None): filtrar por tipo ("FAIL", "BLOCK", "GET", etc.)
-        ip (str ou None): filtrar por endereco IP
-
-    Retorna:
-        list[dict]: eventos que atendem TODOS os criterios fornecidos
-        Criterios None sao ignorados (nao filtram).
-
-    Dicas:
-        - Use list comprehension com condicoes
-        - Para cada criterio que nao for None, adicione uma condicao
-        - Exemplo: [e for e in eventos if (fonte is None or e["fonte"] == fonte)]
-    """
-    pass
+    """Filtra eventos por fonte, tipo e/ou ip. Criterios None sao ignorados."""
+    return [
+        e for e in eventos
+        if (fonte is None or e.get("fonte") == fonte)
+        and (tipo is None or e.get("tipo") == tipo)
+        and (ip is None or e.get("ip") == ip)
+    ]
 
 
 def buscar_ip(ip, eventos, alertas, cache_enriquecimento):
-    """
-    Exibe relatorio completo de um IP: eventos, alertas e geolocalizacao.
+    """Exibe relatorio completo de um IP: eventos, alertas e geolocalizacao."""
+    print(f"\n=== BUSCA POR IP: {ip} ===")
 
-    Parametros:
-        ip (str): endereco IP a buscar
-        eventos (list[dict]): todos os eventos
-        alertas (list[dict]): todos os alertas
-        cache_enriquecimento (dict): cache de consultas de IP
+    eventos_ip = filtrar_eventos(eventos, ip=ip)
+    alertas_ip = [a for a in alertas if a.get("ip") == ip]
 
-    Comportamento esperado:
-        - Filtra eventos desse IP
-        - Filtra alertas desse IP
-        - Consulta enriquecimento (se disponivel)
-        - Exibe tudo formatado
+    print(f"Eventos relacionados: {len(eventos_ip)}")
+    print(f"Alertas gerados:      {len(alertas_ip)}")
 
-    Dicas:
-        - Reutilize filtrar_eventos(eventos, ip=ip)
-        - Para alertas: [a for a in alertas if a["ip"] == ip]
-    """
-    pass
+    if eventos_ip:
+        por_fonte = {}
+        for ev in eventos_ip:
+            f = ev.get("fonte", "?")
+            por_fonte[f] = por_fonte.get(f, 0) + 1
+        print("\nDistribuicao por fonte:")
+        for f, qtd in sorted(por_fonte.items()):
+            print(f"  {f:<10} {qtd}")
+
+    if alertas_ip:
+        print("\nAlertas:")
+        for a in alertas_ip:
+            print(f"  [{a.get('severidade','?')}] {a.get('regra_nome','?')} - {a.get('descricao','')}")
+
+    geo = cache_enriquecimento.get(ip)
+    if geo:
+        print("\nGeolocalizacao (cache):")
+        print(f"  Cidade:  {geo.get('cidade','-')}")
+        print(f"  Regiao:  {geo.get('regiao','-')}")
+        print(f"  Pais:    {geo.get('pais','-')}")
+        print(f"  Org:     {geo.get('org','-')}")
+    else:
+        print("\nGeolocalizacao: nao consultada (rode opcao 7 antes).")
 
 
 def top_ips(eventos, n=10):
-    """
-    Retorna os N IPs com mais eventos registrados.
+    """Retorna lista de tuplas (ip, contagem) ordenada decrescente, limitada a N."""
+    contagem = {}
+    for ev in eventos:
+        ip = ev.get("ip")
+        if not ip:
+            continue
+        contagem[ip] = contagem.get(ip, 0) + 1
 
-    Parametros:
-        eventos (list[dict]): lista de eventos
-        n (int): quantidade de IPs a retornar (padrao: 10)
+    ranking = sorted(contagem.items(), key=lambda x: x[1], reverse=True)
+    return ranking[:n]
 
-    Retorna:
-        list[tuple]: lista de tuplas (ip, contagem) ordenada por contagem decrescente
 
-    Dicas:
-        - Use dicionario para contar eventos por IP
-        - Converta para lista de tuplas: list(contagem.items())
-        - Ordene com sorted(lista, key=lambda x: x[1], reverse=True)
-        - Retorne apenas os primeiros N: resultado[:n]
-    """
-    pass
+def _serializar(obj):
+    """Converte sets em listas recursivamente para JSON."""
+    if isinstance(obj, set):
+        return sorted(obj, key=str)
+    if isinstance(obj, dict):
+        return {k: _serializar(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_serializar(v) for v in obj]
+    return obj
 
 
 def exportar_relatorio_json(dados, caminho):
-    """
-    Salva um relatorio completo em formato JSON.
+    """Salva um relatorio completo em formato JSON (indent=2, ensure_ascii=False)."""
+    pasta = os.path.dirname(caminho)
+    if pasta:
+        os.makedirs(pasta, exist_ok=True)
 
-    Parametros:
-        dados (dict): dicionario com todos os dados do relatorio
-        caminho (str): caminho do arquivo de saida
-
-    Comportamento esperado:
-        - Cria o diretorio de saida se nao existir
-        - Salva o JSON formatado com indent=2 e ensure_ascii=False
-        - Imprime confirmacao com o caminho do arquivo salvo
-
-    Dicas:
-        - Use os.makedirs(os.path.dirname(caminho), exist_ok=True)
-        - Use json.dump(dados, f, indent=2, ensure_ascii=False)
-        - Converta sets para listas antes de salvar (JSON nao suporta set)
-    """
-    pass
+    try:
+        with open(caminho, "w", encoding="utf-8") as f:
+            json.dump(_serializar(dados), f, indent=2, ensure_ascii=False)
+        print(f"[OK] Relatorio salvo em: {caminho}")
+    except OSError as e:
+        print(f"[ERRO] Nao foi possivel salvar {caminho}: {e}")
 
 
 def exibir_tabela(dados, colunas):
-    """
-    Exibe uma lista de dicionarios como tabela formatada no terminal.
+    """Exibe uma lista de dicionarios como tabela formatada no terminal."""
+    if not dados:
+        print("Nenhum dado encontrado.")
+        return
 
-    Parametros:
-        dados (list[dict]): lista de dicionarios a exibir
-        colunas (list[str]): chaves a exibir como colunas
+    larguras = {}
+    for col in colunas:
+        max_dado = max((len(str(d.get(col, ""))) for d in dados), default=0)
+        larguras[col] = max(len(col), max_dado)
 
-    Comportamento esperado:
-        - Exibe cabecalho com os nomes das colunas
-        - Exibe separador (linha de tracos)
-        - Exibe cada linha de dados alinhada com as colunas
-        - Se dados estiver vazio, exibe "Nenhum dado encontrado"
+    cabecalho = "  ".join(f"{col:<{larguras[col]}}" for col in colunas)
+    separador = "  ".join("-" * larguras[col] for col in colunas)
+    print(cabecalho)
+    print(separador)
 
-    Dicas:
-        - Calcule a largura de cada coluna: max(len(str(d[col])) for d in dados)
-        - Use f-string com largura: f"{valor:<{largura}}"
-    """
-    pass
+    for d in dados:
+        linha = "  ".join(f"{str(d.get(col, '')):<{larguras[col]}}" for col in colunas)
+        print(linha)

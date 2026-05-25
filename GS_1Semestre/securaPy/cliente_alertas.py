@@ -12,48 +12,68 @@ PORTA = 9999
 
 
 def receber_alertas(cliente):
-    """
-    Thread que fica ouvindo mensagens do servidor e exibindo no terminal.
+    """Thread que fica ouvindo mensagens do servidor e exibindo no terminal."""
+    while True:
+        try:
+            dados = cliente.recv(4096)
+        except (ConnectionResetError, ConnectionAbortedError, OSError):
+            print("\n[INFO] Conexao com o servidor foi perdida.")
+            break
 
-    Parametros:
-        cliente: objeto socket conectado ao servidor
+        if not dados:
+            print("\n[INFO] Servidor encerrou a conexao.")
+            break
 
-    Comportamento esperado:
-        - Loop infinito recebendo dados com recv(4096)
-        - Se receber string vazia, servidor desconectou
-        - Exibe cada mensagem recebida no terminal
-        - Trata erros de conexao (ConnectionResetError, etc.)
-
-    Dicas:
-        - Use while True com try/except
-        - dados = cliente.recv(4096).decode()
-        - if not dados: break
-    """
-    pass
+        mensagem = dados.decode("utf-8", errors="ignore")
+        print(mensagem, end="" if mensagem.endswith("\n") else "\n")
 
 
 def conectar_servidor(host=HOST, porta=PORTA):
-    """
-    Conecta ao servidor de alertas e inicia a interacao.
+    """Conecta ao servidor de alertas e inicia a interacao."""
+    cliente = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
-    Parametros:
-        host (str): endereco do servidor
-        porta (int): porta do servidor
+    try:
+        cliente.connect((host, porta))
+    except ConnectionRefusedError:
+        print(f"[ERRO] Servidor recusou a conexao em {host}:{porta}. Esta no ar?")
+        cliente.close()
+        return
+    except OSError as e:
+        print(f"[ERRO] Falha ao conectar em {host}:{porta}: {e}")
+        cliente.close()
+        return
 
-    Comportamento esperado:
-        1. Cria socket e conecta ao servidor
-        2. Inicia thread para receber alertas (receber_alertas)
-        3. Loop principal lendo input do usuario e enviando ao servidor
-        4. Se o usuario digitar /sair, desconecta
-        5. Trata erros de conexao
+    print(f"[INFO] Conectado ao servidor {host}:{porta}")
+    print("Digite /status, /historico ou /sair para interagir.\n")
 
-    Dicas:
-        - cliente = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        - cliente.connect((host, porta))
-        - thread = threading.Thread(target=receber_alertas, args=(cliente,), daemon=True)
-        - Use try/except ConnectionRefusedError para tratar servidor offline
-    """
-    pass
+    thread = threading.Thread(target=receber_alertas, args=(cliente,), daemon=True)
+    thread.start()
+
+    try:
+        while True:
+            try:
+                comando = input().strip()
+            except EOFError:
+                break
+
+            if not comando:
+                continue
+
+            try:
+                cliente.sendall((comando + "\n").encode("utf-8"))
+            except OSError:
+                print("[ERRO] Nao foi possivel enviar — conexao perdida.")
+                break
+
+            if comando == "/sair":
+                break
+    except KeyboardInterrupt:
+        print("\n[INFO] Encerrando cliente (Ctrl+C)...")
+    finally:
+        try:
+            cliente.close()
+        except OSError:
+            pass
 
 
 if __name__ == "__main__":

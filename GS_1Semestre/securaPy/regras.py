@@ -25,106 +25,128 @@ Niveis de severidade (baseados na pontuacao):
 import json
 
 
+def _extrair_kv(detalhes):
+    """Extrai pares chave=valor do campo 'detalhes' do evento."""
+    pares = {}
+    if not isinstance(detalhes, str):
+        return pares
+    for token in detalhes.split():
+        if "=" in token:
+            chave, _, valor = token.partition("=")
+            if chave:
+                pares[chave] = valor
+    return pares
+
+
 def carregar_regras(caminho_config):
-    """
-    Le o arquivo regras.json e retorna a lista de regras.
+    """Le o arquivo regras.json e retorna a lista de regras ativas."""
+    try:
+        with open(caminho_config, "r", encoding="utf-8") as f:
+            dados = json.load(f)
+    except FileNotFoundError:
+        print(f"[ERRO] Arquivo de regras nao encontrado: {caminho_config}")
+        return []
+    except json.JSONDecodeError as e:
+        print(f"[ERRO] JSON invalido em {caminho_config}: {e}")
+        return []
+    except OSError as e:
+        print(f"[ERRO] Erro de I/O ao ler {caminho_config}: {e}")
+        return []
 
-    Parametros:
-        caminho_config (str): caminho para o arquivo JSON de regras
-
-    Retorna:
-        list[dict]: lista de dicionarios, cada um representando uma regra
-        Retorna lista vazia se o arquivo nao existir ou JSON for invalido.
-
-    Comportamento esperado:
-        - Se o arquivo nao existir, imprime erro e retorna []
-        - Se o JSON for invalido (malformado), imprime erro e retorna []
-        - Filtra apenas regras com "ativa": true
-
-    Dicas:
-        - Use json.load(f) para ler o arquivo JSON
-        - Trate FileNotFoundError e json.JSONDecodeError
-        - Use list comprehension para filtrar regras ativas:
-          [r for r in regras if r.get("ativa", False)]
-    """
-    pass
+    regras = dados.get("regras", []) if isinstance(dados, dict) else []
+    return [r for r in regras if isinstance(r, dict) and r.get("ativa", False)]
 
 
 def classificar_severidade(pontuacao):
-    """
-    Converte uma pontuacao numerica em nivel de severidade.
+    """Converte uma pontuacao numerica em nivel de severidade."""
+    if pontuacao >= 9:
+        return "CRITICA"
+    if pontuacao >= 7:
+        return "ALTA"
+    if pontuacao >= 5:
+        return "MEDIA"
+    if pontuacao >= 3:
+        return "BAIXA"
+    return "INFO"
 
-    Parametros:
-        pontuacao (int ou float): valor numerico da severidade
 
-    Retorna:
-        str: "CRITICA", "ALTA", "MEDIA", "BAIXA" ou "INFO"
-
-    Mapeamento:
-        >= 9  -> "CRITICA"
-        >= 7  -> "ALTA"
-        >= 5  -> "MEDIA"
-        >= 3  -> "BAIXA"
-        <  3  -> "INFO"
-
-    Dicas:
-        - Use if/elif/else encadeado
-        - Comece pelo maior valor e va descendo
-    """
-    pass
+def _montar_alerta(regra, evento, descricao):
+    """Monta o dicionario de alerta no formato padronizado."""
+    return {
+        "timestamp": evento.get("timestamp", ""),
+        "regra_id": regra.get("id", ""),
+        "regra_nome": regra.get("nome", ""),
+        "severidade": classificar_severidade(regra.get("severidade_base", 0)),
+        "ip": evento.get("ip", ""),
+        "descricao": descricao,
+    }
 
 
 def avaliar_regra(regra, evento):
-    """
-    Avalia se um evento viola uma regra especifica.
+    """Avalia se um evento viola uma regra especifica."""
+    if regra.get("fonte") != evento.get("fonte"):
+        return None
 
-    Parametros:
-        regra (dict): dicionario da regra (do JSON de configuracao)
-        evento (dict): dicionario do evento normalizado (do coletor)
+    condicao = regra.get("condicao")
+    kv = _extrair_kv(evento.get("detalhes", ""))
 
-    Retorna:
-        dict: alerta gerado se a regra foi violada
-        None: se o evento nao viola a regra
+    if condicao == "usuario_privilegiado":
+        usuario = kv.get("usuario")
+        if usuario and usuario in regra.get("usuarios_alvo", []):
+            return _montar_alerta(
+                regra, evento,
+                f"Tentativa de login com usuario {usuario}",
+            )
+        return None
 
-    Comportamento esperado:
-        - Primeiro verifica se a fonte do evento bate com a fonte da regra
-        - Depois avalia a condicao especifica:
-            "usuario_privilegiado": verifica se o usuario esta na lista de alvo
-            "porta_critica": verifica se a porta bloqueada esta na lista critica
-            "path_traversal": verifica se a URL contem padroes de traversal
-            "xss": verifica se a URL contem padroes de XSS
-            "reconhecimento": verifica se a URL esta na lista de suspeitas
+    if condicao == "porta_critica":
+        try:
+            dport = int(kv.get("dport", ""))
+        except (TypeError, ValueError):
+            return None
+        if dport in regra.get("portas_criticas", []):
+            return _montar_alerta(
+                regra, evento,
+                f"Acesso bloqueado a porta critica {dport}",
+            )
+        return None
 
-    Dicas:
-        - Use regra["condicao"] para decidir qual verificacao fazer
-        - Para "usuario_privilegiado": extraia o usuario do campo "detalhes"
-          (ex: "usuario=admin" -> "admin") e veja se esta em regra["usuarios_alvo"]
-        - Para "porta_critica": extraia dport do "detalhes" e veja se esta em regra["portas_criticas"]
-        - Para padroes na URL: use any(padrao in url for padrao in regra["padroes"])
-        - O alerta retornado deve ter: timestamp, regra_id, regra_nome, severidade, ip, descricao
-    """
-    pass
+    if condicao == "path_traversal":
+        url = kv.get("url", "")
+        if url and any(p in url for p in regra.get("padroes", [])):
+            return _montar_alerta(
+                regra, evento,
+                f"Path traversal detectado na URL {url}",
+            )
+        return None
+
+    if condicao == "xss":
+        url = kv.get("url", "")
+        if url and any(p in url for p in regra.get("padroes", [])):
+            return _montar_alerta(
+                regra, evento,
+                f"Padrao de XSS detectado na URL {url}",
+            )
+        return None
+
+    if condicao == "reconhecimento":
+        url = kv.get("url", "")
+        if url and any(s in url for s in regra.get("urls_suspeitas", [])):
+            return _montar_alerta(
+                regra, evento,
+                f"Acesso a URL de reconhecimento {url}",
+            )
+        return None
+
+    return None
 
 
 def aplicar_regras(eventos, regras):
-    """
-    Aplica todas as regras a todos os eventos e retorna os alertas gerados.
-
-    Parametros:
-        eventos (list[dict]): lista de eventos normalizados
-        regras (list[dict]): lista de regras ativas
-
-    Retorna:
-        list[dict]: lista de alertas gerados
-
-    Comportamento esperado:
-        - Para cada evento, testa todas as regras
-        - Se avaliar_regra retorna um alerta (nao None), adiciona a lista
-        - Um mesmo evento pode gerar multiplos alertas (violar varias regras)
-
-    Dicas:
-        - Use dois loops for aninhados: para cada evento, para cada regra
-        - resultado = avaliar_regra(regra, evento)
-        - if resultado is not None: alertas.append(resultado)
-    """
-    pass
+    """Aplica todas as regras a todos os eventos e retorna os alertas gerados."""
+    alertas = []
+    for evento in eventos:
+        for regra in regras:
+            alerta = avaliar_regra(regra, evento)
+            if alerta is not None:
+                alertas.append(alerta)
+    return alertas
