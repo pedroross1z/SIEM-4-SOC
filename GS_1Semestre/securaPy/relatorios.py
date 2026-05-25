@@ -21,6 +21,7 @@ _MENU = """
 |  7. Enriquecer IPs suspeitos             |
 |  8. Exportar relatorio JSON              |
 |  9. Iniciar servidor de alertas          |
+| 10. Funcionalidades bonus                |
 |  0. Sair                                 |
 +==========================================+
 """
@@ -33,7 +34,7 @@ def exibir_menu():
         opcao = int(input("Escolha uma opcao: ").strip())
     except (ValueError, EOFError):
         return -1
-    if opcao < 0 or opcao > 9:
+    if opcao < 0 or opcao > 10:
         return -1
     return opcao
 
@@ -151,6 +152,90 @@ def exportar_relatorio_json(dados, caminho):
         print(f"[OK] Relatorio salvo em: {caminho}")
     except OSError as e:
         print(f"[ERRO] Nao foi possivel salvar {caminho}: {e}")
+
+
+_CONDICOES_VALIDAS = {
+    "usuario_privilegiado": ("auth", "usuarios_alvo", "Lista de usuarios alvo (separados por virgula)"),
+    "porta_critica":        ("firewall", "portas_criticas", "Lista de portas criticas (numeros separados por virgula)"),
+    "path_traversal":       ("web", "padroes", "Lista de padroes de path traversal (separados por virgula)"),
+    "xss":                  ("web", "padroes", "Lista de padroes de XSS (separados por virgula)"),
+    "reconhecimento":       ("web", "urls_suspeitas", "Lista de URLs suspeitas (separadas por virgula)"),
+}
+
+
+def criar_regra_interativa(caminho_regras):
+    """Cria nova regra via prompt e adiciona ao arquivo regras.json existente."""
+    print("\n=== CRIAR NOVA REGRA ===")
+    print(f"Condicoes disponiveis: {', '.join(_CONDICOES_VALIDAS)}")
+
+    condicao = input("Condicao: ").strip()
+    if condicao not in _CONDICOES_VALIDAS:
+        print(f"[ERRO] Condicao invalida: {condicao}")
+        return False
+
+    fonte_esperada, campo_lista, prompt_lista = _CONDICOES_VALIDAS[condicao]
+
+    id_regra = input("ID (ex: R006): ").strip().upper()
+    nome = input("Nome: ").strip()
+    descricao = input("Descricao: ").strip()
+    print(f"Fonte sera fixada como: {fonte_esperada}")
+
+    valores_raw = input(f"{prompt_lista}: ").strip()
+    valores = [v.strip() for v in valores_raw.split(",") if v.strip()]
+    if not valores:
+        print("[ERRO] Lista vazia.")
+        return False
+
+    if campo_lista == "portas_criticas":
+        try:
+            valores = [int(v) for v in valores]
+        except ValueError:
+            print("[ERRO] Portas devem ser numeros inteiros.")
+            return False
+
+    try:
+        severidade_base = int(input("Severidade base (0-10): ").strip())
+    except ValueError:
+        print("[ERRO] Severidade deve ser inteiro.")
+        return False
+
+    if not id_regra or not nome:
+        print("[ERRO] ID e nome sao obrigatorios.")
+        return False
+
+    nova = {
+        "id": id_regra,
+        "nome": nome,
+        "descricao": descricao,
+        "fonte": fonte_esperada,
+        "condicao": condicao,
+        campo_lista: valores,
+        "severidade_base": severidade_base,
+        "ativa": True,
+    }
+
+    try:
+        with open(caminho_regras, "r", encoding="utf-8") as f:
+            dados = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        dados = {"regras": []}
+
+    regras = dados.get("regras", [])
+    if any(r.get("id") == id_regra for r in regras):
+        print(f"[ERRO] Ja existe regra com id {id_regra}.")
+        return False
+
+    regras.append(nova)
+    dados["regras"] = regras
+
+    pasta = os.path.dirname(caminho_regras)
+    if pasta:
+        os.makedirs(pasta, exist_ok=True)
+    with open(caminho_regras, "w", encoding="utf-8") as f:
+        json.dump(dados, f, indent=2, ensure_ascii=False)
+
+    print(f"[OK] Regra {id_regra} adicionada em {caminho_regras}")
+    return True
 
 
 def exibir_tabela(dados, colunas):

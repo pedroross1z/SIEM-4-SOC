@@ -11,6 +11,7 @@ from coletor import carregar_todos_os_logs
 from regras import carregar_regras, aplicar_regras
 from detector import (
     detectar_brute_force,
+    detectar_brute_force_temporal,
     detectar_port_scan,
     verificar_blacklist,
     gerar_resumo_ameacas,
@@ -24,12 +25,16 @@ from relatorios import (
     top_ips,
     exportar_relatorio_json,
     exibir_tabela,
+    criar_regra_interativa,
 )
+from integridade import salvar_hashes, verificar_hashes
+from gerador_logs import gerar_logs
 
 # Configuracoes
 PASTA_BASE = os.path.dirname(os.path.abspath(__file__))
 PASTA_LOGS = os.path.join(PASTA_BASE, "logs")
 ARQUIVO_REGRAS = os.path.join(PASTA_BASE, "config", "regras.json")
+ARQUIVO_HASHES = os.path.join(PASTA_BASE, "config", "hashes.json")
 PASTA_SAIDA = os.path.join(PASTA_BASE, "saida")
 BLACKLIST = {"185.220.101.1", "45.33.32.156", "91.240.118.172", "23.94.5.100"}
 
@@ -91,6 +96,78 @@ def _exportar(eventos, alertas, resumo):
         "ameacas": resumo,
     }
     exportar_relatorio_json(dados, caminho)
+
+
+_SUBMENU_BONUS = """
++------------------------------------------+
+|       Funcionalidades Bonus              |
++------------------------------------------+
+|  A. Correlacao temporal (brute force)    |
+|  B. Hash de integridade dos logs         |
+|  C. Gerar logs sinteticos                |
+|  D. Criar nova regra customizada         |
+|  V. Voltar                               |
++------------------------------------------+
+"""
+
+
+def _submenu_bonus(eventos):
+    print(_SUBMENU_BONUS)
+    escolha = input("Escolha (A/B/C/D/V): ").strip().upper()
+
+    if escolha == "A":
+        if not _exige_dados(eventos):
+            return
+        try:
+            janela = int(input("Janela em segundos (padrao 60): ").strip() or "60")
+            thr = int(input("Threshold de tentativas (padrao 5): ").strip() or "5")
+        except ValueError:
+            print("[ERRO] Valor invalido.")
+            return
+        resultado = detectar_brute_force_temporal(eventos, threshold=thr, janela_segundos=janela)
+        if not resultado:
+            print(f"Nenhum brute force detectado em janelas de {janela}s.")
+            return
+        for ip, dados in resultado.items():
+            print(f"\n[{dados['severidade']}] {ip}")
+            print(f"  Pico: {dados['tentativas_pico']} tentativas em {dados['duracao_segundos']}s")
+            print(f"  Janela: {dados['janela_inicio']} -> {dados['janela_fim']}")
+            print(f"  Usuarios: {dados['usuarios']}")
+
+    elif escolha == "B":
+        print("\n1. Salvar hashes atuais")
+        print("2. Verificar integridade")
+        sub = input("Opcao: ").strip()
+        if sub == "1":
+            salvar_hashes(PASTA_LOGS, ARQUIVO_HASHES)
+        elif sub == "2":
+            relatorio = verificar_hashes(PASTA_LOGS, ARQUIVO_HASHES)
+            if not relatorio:
+                return
+            for nome, status in relatorio.items():
+                marcador = "[OK]" if status == "OK" else f"[{status}]"
+                print(f"  {marcador:<14} {nome}")
+        else:
+            print("[ERRO] Opcao invalida.")
+
+    elif escolha == "C":
+        pasta = input("Pasta de saida (padrao logs_gerados): ").strip() or "logs_gerados"
+        try:
+            n = int(input("Linhas por arquivo (padrao 50): ").strip() or "50")
+            prop = float(input("Proporcao de ataques 0.0-1.0 (padrao 0.3): ").strip() or "0.3")
+        except ValueError:
+            print("[ERRO] Valor invalido.")
+            return
+        gerar_logs(os.path.join(PASTA_BASE, pasta) if not os.path.isabs(pasta) else pasta, n, prop)
+
+    elif escolha == "D":
+        criar_regra_interativa(ARQUIVO_REGRAS)
+
+    elif escolha == "V":
+        return
+
+    else:
+        print(f"[ERRO] Opcao desconhecida: {escolha}")
 
 
 def main():
@@ -167,6 +244,9 @@ def main():
             from servidor_alertas import iniciar_servidor
             print("[INFO] Iniciando servidor de alertas (Ctrl+C para encerrar)...")
             iniciar_servidor()
+
+        elif opcao == 10:
+            _submenu_bonus(eventos)
 
         elif opcao == 0:
             print("Encerrando SecuraPy. Ate logo!")

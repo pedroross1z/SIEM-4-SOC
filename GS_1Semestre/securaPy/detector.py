@@ -9,6 +9,8 @@ Detecta:
 - IPs em Blacklist: IPs conhecidamente maliciosos presentes nos logs
 """
 
+from datetime import datetime
+
 from regras import classificar_severidade
 
 
@@ -67,6 +69,60 @@ def detectar_brute_force(eventos, threshold=5):
             "usuarios": sorted(usuarios.get(ip, set())),
             "severidade": _severidade_brute(tentativas, threshold),
         }
+    return resultado
+
+
+def detectar_brute_force_temporal(eventos, threshold=5, janela_segundos=60):
+    """Detecta brute force por janela de tempo (sliding window).
+
+    Para cada IP, considera-se ataque se houver >= threshold tentativas FAIL
+    em qualquer janela contigua de `janela_segundos`.
+
+    Retorna: {ip: {"tentativas_pico": N, "janela_inicio": ts, "janela_fim": ts,
+                   "duracao_segundos": N, "usuarios": [...], "severidade": "..."}}
+    """
+    fails_por_ip = {}
+    for evento in eventos:
+        if evento.get("fonte") != "auth" or evento.get("tipo") != "FAIL":
+            continue
+        ip = evento.get("ip")
+        if not ip:
+            continue
+        try:
+            ts = datetime.strptime(evento["timestamp"], "%Y-%m-%d %H:%M:%S")
+        except (KeyError, ValueError):
+            continue
+        usuario = _extrair_kv(evento.get("detalhes", "")).get("usuario", "?")
+        fails_por_ip.setdefault(ip, []).append((ts, usuario))
+
+    resultado = {}
+    for ip, eventos_ip in fails_por_ip.items():
+        eventos_ip.sort(key=lambda x: x[0])
+        n = len(eventos_ip)
+        melhor = 0
+        melhor_inicio = melhor_fim = None
+        melhor_usuarios = set()
+
+        inicio = 0
+        for fim in range(n):
+            while (eventos_ip[fim][0] - eventos_ip[inicio][0]).total_seconds() > janela_segundos:
+                inicio += 1
+            tamanho_janela = fim - inicio + 1
+            if tamanho_janela > melhor:
+                melhor = tamanho_janela
+                melhor_inicio = eventos_ip[inicio][0]
+                melhor_fim = eventos_ip[fim][0]
+                melhor_usuarios = {eventos_ip[i][1] for i in range(inicio, fim + 1)}
+
+        if melhor >= threshold:
+            resultado[ip] = {
+                "tentativas_pico": melhor,
+                "janela_inicio": melhor_inicio.strftime("%Y-%m-%d %H:%M:%S"),
+                "janela_fim": melhor_fim.strftime("%Y-%m-%d %H:%M:%S"),
+                "duracao_segundos": int((melhor_fim - melhor_inicio).total_seconds()),
+                "usuarios": sorted(melhor_usuarios),
+                "severidade": _severidade_brute(melhor, threshold),
+            }
     return resultado
 
 
