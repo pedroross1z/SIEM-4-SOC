@@ -151,11 +151,11 @@ securaPy/
 
 | Nome | RM | Responsabilidade |
 |------|-----|-----------------|
-| Elias de Aguiar Matos Junior | 568932 | [Módulos que implementou] |
-| Guilherme costa Praxedes | 569990 | [Módulos que implementou] |
-| Gustavo Cesar Dutra Batista | 569964 | [Módulos que implementou] |
-| Italo Henrique Passos Bastos | 573624 | [Módulos que implementou] |
-| Pedro Rossi de Macedo | 571590 | [Módulos que implementou] |
+| Elias de Aguiar Matos Junior | 568932  |
+| Guilherme costa Praxedes | 569990 |  |
+| Gustavo Cesar Dutra Batista | 569964 |  
+| Italo Henrique Passos Bastos | 573624 |  
+| Pedro Rossi de Macedo | 571590 |  
 
 ## Descrição
 
